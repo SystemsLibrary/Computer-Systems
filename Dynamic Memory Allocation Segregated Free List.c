@@ -25,6 +25,7 @@ void free_list_block(int* start, int position, int len)
 	*(start + 1) = *p;
 	*(p + 1) = next;
 	*(p + 2) = 0;
+	*(start + next * len + 2) = *p;
 
 	for (int l = 0; l < n; l++)
 	{
