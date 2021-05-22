@@ -6,8 +6,8 @@
 #include <string.h>
 #include <errno.h>
 
-#define MAXLINE 8192
-#define RIO_BUFSIZE 8192
+#define BUF_SIZE 1024
+#define RIO_BUFSIZE 1024
 
 typedef struct {
     int rio_fd;                /* Descriptor for this internal buf */
@@ -15,132 +15,6 @@ typedef struct {
     char *rio_bufptr;          /* Next unread byte in internal buf */
     char rio_buf[RIO_BUFSIZE]; /* Internal buffer */
 } rio_t;
-
-void gai_error(int code, char *msg) /* Getaddrinfo-style error */
-{
-    fprintf(stderr, "%s: %s\n", msg, gai_strerror(code));
-    exit(0);
-}
-
-void app_error(char *msg) /* Application error */
-{
-    fprintf(stderr, "%s\n", msg);
-    exit(0);
-}
-
-void unix_error(char *msg) /* Unix-style error */
-{
-    fprintf(stderr, "%s: %s\n", msg, strerror(errno));
-    exit(0);
-}
-
-void Close(int fd) 
-{
-    int rc;
-
-    if ((rc = close(fd)) < 0)
-	unix_error("Close error");
-}
-
-void Getaddrinfo(const char *node, const char *service, const struct addrinfo *hints, struct addrinfo **res)
-{
-    int rc;
-
-    if ((rc = getaddrinfo(node, service, hints, res)) != 0) 
-        gai_error(rc, "Getaddrinfo error");
-}
-
-void Freeaddrinfo(struct addrinfo *res)
-{
-    freeaddrinfo(res);
-}
-
-int open_clientfd(char *hostname, char *port) {
-    int clientfd;
-    struct addrinfo hints, *listp, *p;
-
-    /* Get a list of potential server addresses */
-    memset(&hints, 0, sizeof(struct addrinfo));
-    hints.ai_socktype = SOCK_STREAM;  /* Open a connection */
-    hints.ai_flags = AI_NUMERICSERV;  /* ... using a numeric port arg. */
-    hints.ai_flags |= AI_ADDRCONFIG;  /* Recommended for connections */
-    Getaddrinfo(hostname, port, &hints, &listp);
-  
-    /* Walk the list for one that we can successfully connect to */
-    for (p = listp; p; p = p->ai_next) {
-        /* Create a socket descriptor */
-        if ((clientfd = socket(p->ai_family, p->ai_socktype, p->ai_protocol)) < 0) 
-            continue; /* Socket failed, try the next */
-
-        /* Connect to the server */
-        if (connect(clientfd, p->ai_addr, p->ai_addrlen) != -1) 
-            break; /* Success */
-        Close(clientfd); /* Connect failed, try another */  //line:netp:openclientfd:closefd
-    } 
-
-    /* Clean up */
-    Freeaddrinfo(listp);
-    if (!p) /* All connects failed */
-        return -1;
-    else    /* The last connect succeeded */
-        return clientfd;
-}
-
-int Open_clientfd(char *hostname, char *port) 
-{
-    int rc;
-
-    if ((rc = open_clientfd(hostname, port)) < 0) 
-	unix_error("Open_clientfd error");
-    return rc;
-}
-
-void rio_readinitb(rio_t *rp, int fd) 
-{
-    rp->rio_fd = fd;  
-    rp->rio_cnt = 0;  
-    rp->rio_bufptr = rp->rio_buf;
-}
-
-void Rio_readinitb(rio_t *rp, int fd)
-{
-    rio_readinitb(rp, fd);
-} 
-
-char *Fgets(char *ptr, int n, FILE *stream) 
-{
-    char *rptr;
-
-    if (((rptr = fgets(ptr, n, stream)) == NULL) && ferror(stream))
-	app_error("Fgets error");
-
-    return rptr;
-}
-
-ssize_t rio_writen(int fd, void *usrbuf, size_t n) 
-{
-    size_t nleft = n;
-    ssize_t nwritten;
-    char *bufp = usrbuf;
-
-    while (nleft > 0) {
-	if ((nwritten = write(fd, bufp, nleft)) <= 0) {
-	    if (errno == EINTR)  /* Interrupted by sig handler return */
-		nwritten = 0;    /* and call write() again */
-	    else
-		return -1;       /* errno set by write() */
-	}
-	nleft -= nwritten;
-	bufp += nwritten;
-    }
-    return n;
-}
-
-void Rio_writen(int fd, void *usrbuf, size_t n) 
-{
-    if (rio_writen(fd, usrbuf, n) != n)
-	unix_error("Rio_writen error");
-}
 
 static ssize_t rio_read(rio_t *rp, char *usrbuf, size_t n)
 {
@@ -193,38 +67,72 @@ ssize_t rio_readlineb(rio_t *rp, void *usrbuf, size_t maxlen)
     return n-1;
 }
 
-ssize_t Rio_readlineb(rio_t *rp, void *usrbuf, size_t maxlen) 
+ssize_t rio_writen(int fd, void *usrbuf, size_t n) 
 {
-    ssize_t rc;
+    size_t nleft = n;
+    ssize_t nwritten;
+    char *bufp = usrbuf;
 
-    if ((rc = rio_readlineb(rp, usrbuf, maxlen)) < 0)
-	unix_error("Rio_readlineb error");
-    return rc;
-} 
+    while (nleft > 0) {
+	if ((nwritten = write(fd, bufp, nleft)) <= 0) {
+	    if (errno == EINTR)  /* Interrupted by sig handler return */
+		nwritten = 0;    /* and call write() again */
+	    else
+		return -1;       /* errno set by write() */
+	}
+	nleft -= nwritten;
+	bufp += nwritten;
+    }
+    return n;
+}
 
-void Fputs(const char *ptr, FILE *stream) 
+void rio_readinitb(rio_t *rp, int fd) 
 {
-    if (fputs(ptr, stream) == EOF)
-	unix_error("Fputs error");
+    rp->rio_fd = fd;  
+    rp->rio_cnt = 0;  
+    rp->rio_bufptr = rp->rio_buf;
 }
 
 int main(int argc, char **argv)
 {
- 	int clientfd;
- 	char *host, *port, buf[MAXLINE];
- 
+	int sfd, nread, len;
+	char buf[BUF_SIZE];
 	rio_t rio;
- 	host = argv[1];
- 	port = argv[2];
- 	clientfd = Open_clientfd(host, port);
- 	Rio_readinitb(&rio, clientfd);
+
+	struct sockaddr_storage peer_addr;
+	socklen_t peer_addr_len;
+
+	struct addrinfo hints, *res, *rp;
+
+	memset(&hints, 0, sizeof(hints));
+	hints.ai_family = AF_UNSPEC;
+	hints.ai_socktype = SOCK_DGRAM;             
+    	hints.ai_flags = AI_PASSIVE | AI_ADDRCONFIG; 
+    	hints.ai_flags |= AI_NUMERICSERV;
+	hints.ai_protocol = 0;
+	hints.ai_addr = NULL;
+        hints.ai_next = NULL;             
+    	getaddrinfo(argv[1], argv[2], &hints, &res);
+
+	for (rp = res; rp != NULL; rp = rp->ai_next) {
+               sfd = socket(rp->ai_family, rp->ai_socktype,
+                       rp->ai_protocol);
+               if (sfd == -1)
+                   continue;
+
+               if (connect(sfd, rp->ai_addr, rp->ai_addrlen) != -1)
+                   break;                  /* Success */
+
+               close(sfd);
+        }
+
+	freeaddrinfo(res);
+
+	rio_readinitb(&rio, sfd);
  
-	while (Fgets(buf, MAXLINE, stdin) != NULL) {
-		Rio_writen(clientfd, buf, strlen(buf));
-		Rio_readlineb(&rio, buf, MAXLINE);
-		Fputs(buf, stdout);
+	while (fgets(buf, BUF_SIZE, stdin) != NULL) {
+		rio_writen(sfd, buf, strlen(buf));
+		rio_readlineb(&rio, buf, BUF_SIZE);
+		fputs(buf, stdout);
  	}
- 	
-	Close(clientfd);
- 	exit(0);
-} 
+}
