@@ -164,12 +164,6 @@ int main(int argc, char **argv)
 		*nread = accept(sfd, (struct sockaddr *)&peer_addr, &peer_addr_len);
 
 		pthread_create(&tid, NULL, thread, nread);
-		
-		//rio_readinitb(&rio, nread);
-
-		//n = rio_readlineb(&rio, buf, BUF_SIZE);
-
-		//rio_writen(sfd, buf, n);
 
 		close(sfd);
 	}
