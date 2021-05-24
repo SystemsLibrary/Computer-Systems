@@ -161,22 +161,7 @@ void echo_cnt(int nread)
 
 void *thread(void *vargp)
 {
-	//int n; 
-    	//char buf[BUF_SIZE]; 
-    	//rio_t rio;
-
- 	//int nread = *((int *)vargp);
  	pthread_detach(pthread_self());
- 	//free(vargp);
-
- 	//rio_readinitb(&rio, nread);
-
-	//n = rio_readlineb(&rio, buf, BUF_SIZE);
-
-	//rio_writen(nread, buf, n);
-
- 	//close(nread);
-
 
 	while (1) {
  		int connfd = sbuf_remove(&sbuf); /* Remove connfd from buf */
@@ -240,9 +225,5 @@ int main(int argc, char **argv)
 		*nread = accept(sfd, (struct sockaddr *)&peer_addr, &peer_addr_len);
 
 		sbuf_insert(&sbuf, *nread); 
-
-		//pthread_create(&tid, NULL, thread, nread);
-
-		//close(sfd);
 	}
 }
